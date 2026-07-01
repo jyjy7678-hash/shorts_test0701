@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>YouTube Shorts iframe 테스트</title>
+  <title>YouTube Shorts iframe 테스트 v2</title>
   <style>
     * { box-sizing: border-box; }
     html, body {
@@ -13,6 +13,7 @@
       overflow: hidden;
       background: #000;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overscroll-behavior: none;
     }
 
     .app {
@@ -44,6 +45,12 @@
       overflow: hidden;
     }
 
+    .yt-player {
+      width: 100%;
+      height: 100%;
+      background: #000;
+    }
+
     iframe {
       width: 100%;
       height: 100%;
@@ -51,28 +58,6 @@
       display: block;
       background: #000;
     }
-
-    /* 뷰스터에서 의심되는 투명 터치 오버레이는 일부러 넣지 않았습니다.
-       iframe 기본 터치/오버레이 숨김 동작을 확인하기 위한 테스트입니다. */
-
-    .hint {
-      position: absolute;
-      left: 12px;
-      right: 12px;
-      bottom: calc(20px + env(safe-area-inset-bottom));
-      z-index: 10;
-      padding: 10px 12px;
-      border-radius: 12px;
-      background: rgba(0,0,0,.55);
-      color: #fff;
-      font-size: 13px;
-      line-height: 1.4;
-      opacity: 1;
-      transition: opacity .25s ease;
-      pointer-events: none;
-    }
-
-    .hint.hide { opacity: 0; }
 
     .index {
       position: absolute;
@@ -98,19 +83,47 @@
       border-radius: 999px;
       font-size: 12px;
       pointer-events: none;
+      transition: opacity .25s ease;
     }
+
+    .note.hide { opacity: 0; }
+
+    .fallback {
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: calc(18px + env(safe-area-inset-bottom));
+      z-index: 10;
+      color: rgba(255,255,255,.8);
+      background: rgba(0,0,0,.45);
+      padding: 8px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+      line-height: 1.4;
+      pointer-events: none;
+      transition: opacity .25s ease;
+    }
+
+    .fallback.hide { opacity: 0; }
   </style>
 </head>
 <body>
-  <div class="note">iframe Shorts 테스트</div>
+  <div class="note" id="note">controls=0 · reload 없음</div>
   <main class="app" id="app"></main>
 
   <script>
     /*
-      테스트용 YouTube Shorts videoId 10개.
-      필요하면 아래 videoIds만 교체해서 테스트하면 됩니다.
-      Shorts URL이 https://www.youtube.com/shorts/VIDEO_ID 라면 VIDEO_ID 부분만 넣으세요.
+      v2 변경점
+      1. 슬라이드 이동 시 iframe src를 다시 로드하지 않습니다.
+      2. YouTube IFrame API로 현재 영상 playVideo, 이전 영상 pauseVideo만 호출합니다.
+      3. controls=0 옵션으로 하단 컨트롤/버튼 노출을 최소화합니다.
+      4. autoplay + mute 상태로 시작합니다.
+
+      주의:
+      YouTube iframe 내부의 상단 제목/Shorts 로고/일시정지 아이콘 등은
+      YouTube가 자체적으로 제어하는 UI라 완전 제거가 안 될 수 있습니다.
     */
+
     const videoIds = [
       "dQw4w9WgXcQ",
       "9bZkp7q19f0",
@@ -125,19 +138,9 @@
     ];
 
     const app = document.getElementById("app");
-
-    function makeSrc(id, active) {
-      const params = new URLSearchParams({
-        autoplay: active ? "1" : "0",
-        mute: "1",
-        playsinline: "1",
-        controls: "1",
-        rel: "0",
-        enablejsapi: "1"
-      });
-
-      return `https://www.youtube.com/embed/${id}?${params.toString()}`;
-    }
+    const players = [];
+    let currentIndex = 0;
+    let apiReady = false;
 
     videoIds.forEach((id, i) => {
       const section = document.createElement("section");
@@ -147,59 +150,124 @@
       const wrap = document.createElement("div");
       wrap.className = "player-wrap";
 
-      const iframe = document.createElement("iframe");
-      iframe.src = makeSrc(id, i === 0);
-      iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
-      iframe.allowFullscreen = true;
-      iframe.title = `Shorts iframe test ${i + 1}`;
+      const playerDiv = document.createElement("div");
+      playerDiv.className = "yt-player";
+      playerDiv.id = `player-${i}`;
 
       const index = document.createElement("div");
       index.className = "index";
       index.textContent = `${i + 1} / ${videoIds.length}`;
 
-      const hint = document.createElement("div");
-      hint.className = "hint";
-      hint.textContent = "위/아래로 슬라이드 · 빈 공간 터치 후 YouTube 오버레이가 사라지는지 확인";
+      const fallback = document.createElement("div");
+      fallback.className = "fallback";
+      fallback.textContent = "슬라이드 이동 시 재로딩 없이 play/pause만 테스트";
+      setTimeout(() => fallback.classList.add("hide"), 2500);
 
-      wrap.appendChild(iframe);
+      wrap.appendChild(playerDiv);
       wrap.appendChild(index);
-      wrap.appendChild(hint);
+      wrap.appendChild(fallback);
       section.appendChild(wrap);
       app.appendChild(section);
-
-      setTimeout(() => hint.classList.add("hide"), 2500);
     });
 
-    /*
-      슬라이드 이동 시 현재 화면 iframe만 autoplay로 다시 로드.
-      YouTube iframe 내부 UI를 JS로 강제 제어하는 목적이 아니라,
-      다음 숏츠로 넘어가는 기본 UX 테스트용입니다.
-    */
-    const sections = [...document.querySelectorAll(".short")];
-    let current = 0;
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
 
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (!entry.isIntersecting || entry.intersectionRatio < 0.75) return;
+    window.onYouTubeIframeAPIReady = function () {
+      apiReady = true;
 
-        const next = Number(entry.target.dataset.index);
-        if (next === current) return;
-        current = next;
+      videoIds.forEach((videoId, i) => {
+        players[i] = new YT.Player(`player-${i}`, {
+          videoId,
+          width: "100%",
+          height: "100%",
+          playerVars: {
+            autoplay: i === 0 ? 1 : 0,
+            mute: 1,
+            controls: 0,
+            playsinline: 1,
+            rel: 0,
+            fs: 0,
+            disablekb: 1,
+            iv_load_policy: 3,
+            modestbranding: 1,
+            enablejsapi: 1,
+            origin: location.origin
+          },
+          events: {
+            onReady: (event) => {
+              event.target.mute();
 
-        sections.forEach((section, idx) => {
-          const iframe = section.querySelector("iframe");
-          const id = videoIds[idx];
-
-          if (idx === current) {
-            iframe.src = makeSrc(id, true);
-          } else {
-            iframe.src = makeSrc(id, false);
+              if (i === 0) {
+                safePlay(event.target);
+              } else {
+                event.target.pauseVideo();
+              }
+            },
+            onStateChange: (event) => {
+              if (event.data === YT.PlayerState.ENDED) {
+                event.target.seekTo(0, true);
+                safePlay(event.target);
+              }
+            }
           }
         });
       });
-    }, { threshold: [0.75] });
+    };
+
+    function safePlay(player) {
+      try {
+        player.mute();
+        player.playVideo();
+      } catch (e) {}
+    }
+
+    function safePause(player) {
+      try {
+        player.pauseVideo();
+      } catch (e) {}
+    }
+
+    function activate(index) {
+      if (!apiReady || !players[index]) return;
+
+      currentIndex = index;
+
+      players.forEach((player, i) => {
+        if (!player || typeof player.playVideo !== "function") return;
+        if (i === currentIndex) {
+          safePlay(player);
+        } else {
+          safePause(player);
+        }
+      });
+    }
+
+    const sections = [...document.querySelectorAll(".short")];
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting || entry.intersectionRatio < 0.65) return;
+
+        const next = Number(entry.target.dataset.index);
+        if (next !== currentIndex) {
+          activate(next);
+        }
+      });
+    }, { threshold: [0.65] });
 
     sections.forEach(section => observer.observe(section));
+
+    let scrollTimer = null;
+    app.addEventListener("scroll", () => {
+      clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(() => {
+        const idx = Math.round(app.scrollTop / window.innerHeight);
+        if (idx >= 0 && idx < videoIds.length) activate(idx);
+      }, 120);
+    }, { passive: true });
+
+    setTimeout(() => document.getElementById("note").classList.add("hide"), 2500);
   </script>
 </body>
 </html>
