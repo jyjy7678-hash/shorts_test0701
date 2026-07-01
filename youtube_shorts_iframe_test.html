@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>YouTube Shorts iframe 테스트</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .app {
+      height: 100dvh;
+      width: 100vw;
+      overflow-y: scroll;
+      scroll-snap-type: y mandatory;
+      -webkit-overflow-scrolling: touch;
+      background: #000;
+    }
+
+    .short {
+      position: relative;
+      height: 100dvh;
+      width: 100vw;
+      scroll-snap-align: start;
+      scroll-snap-stop: always;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+
+    .player-wrap {
+      position: relative;
+      height: 100dvh;
+      width: min(100vw, 520px);
+      background: #000;
+      overflow: hidden;
+    }
+
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+      background: #000;
+    }
+
+    /* 뷰스터에서 의심되는 투명 터치 오버레이는 일부러 넣지 않았습니다.
+       iframe 기본 터치/오버레이 숨김 동작을 확인하기 위한 테스트입니다. */
+
+    .hint {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: calc(20px + env(safe-area-inset-bottom));
+      z-index: 10;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(0,0,0,.55);
+      color: #fff;
+      font-size: 13px;
+      line-height: 1.4;
+      opacity: 1;
+      transition: opacity .25s ease;
+      pointer-events: none;
+    }
+
+    .hint.hide { opacity: 0; }
+
+    .index {
+      position: absolute;
+      top: calc(14px + env(safe-area-inset-top));
+      left: 14px;
+      z-index: 10;
+      color: #fff;
+      background: rgba(0,0,0,.45);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      pointer-events: none;
+    }
+
+    .note {
+      position: fixed;
+      top: calc(10px + env(safe-area-inset-top));
+      right: 10px;
+      z-index: 20;
+      color: #fff;
+      background: rgba(37, 99, 235, .9);
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="note">iframe Shorts 테스트</div>
+  <main class="app" id="app"></main>
+
+  <script>
+    /*
+      테스트용 YouTube Shorts videoId 10개.
+      필요하면 아래 videoIds만 교체해서 테스트하면 됩니다.
+      Shorts URL이 https://www.youtube.com/shorts/VIDEO_ID 라면 VIDEO_ID 부분만 넣으세요.
+    */
+    const videoIds = [
+      "dQw4w9WgXcQ",
+      "9bZkp7q19f0",
+      "kJQP7kiw5Fk",
+      "hT_nvWreIhg",
+      "fJ9rUzIMcZQ",
+      "OPf0YbXqDm0",
+      "CevxZvSJLk8",
+      "RgKAFK5djSk",
+      "JGwWNGJdvx8",
+      "60ItHLz5WEA"
+    ];
+
+    const app = document.getElementById("app");
+
+    function makeSrc(id, active) {
+      const params = new URLSearchParams({
+        autoplay: active ? "1" : "0",
+        mute: "1",
+        playsinline: "1",
+        controls: "1",
+        rel: "0",
+        enablejsapi: "1"
+      });
+
+      return `https://www.youtube.com/embed/${id}?${params.toString()}`;
+    }
+
+    videoIds.forEach((id, i) => {
+      const section = document.createElement("section");
+      section.className = "short";
+      section.dataset.index = i;
+
+      const wrap = document.createElement("div");
+      wrap.className = "player-wrap";
+
+      const iframe = document.createElement("iframe");
+      iframe.src = makeSrc(id, i === 0);
+      iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+      iframe.allowFullscreen = true;
+      iframe.title = `Shorts iframe test ${i + 1}`;
+
+      const index = document.createElement("div");
+      index.className = "index";
+      index.textContent = `${i + 1} / ${videoIds.length}`;
+
+      const hint = document.createElement("div");
+      hint.className = "hint";
+      hint.textContent = "위/아래로 슬라이드 · 빈 공간 터치 후 YouTube 오버레이가 사라지는지 확인";
+
+      wrap.appendChild(iframe);
+      wrap.appendChild(index);
+      wrap.appendChild(hint);
+      section.appendChild(wrap);
+      app.appendChild(section);
+
+      setTimeout(() => hint.classList.add("hide"), 2500);
+    });
+
+    /*
+      슬라이드 이동 시 현재 화면 iframe만 autoplay로 다시 로드.
+      YouTube iframe 내부 UI를 JS로 강제 제어하는 목적이 아니라,
+      다음 숏츠로 넘어가는 기본 UX 테스트용입니다.
+    */
+    const sections = [...document.querySelectorAll(".short")];
+    let current = 0;
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting || entry.intersectionRatio < 0.75) return;
+
+        const next = Number(entry.target.dataset.index);
+        if (next === current) return;
+        current = next;
+
+        sections.forEach((section, idx) => {
+          const iframe = section.querySelector("iframe");
+          const id = videoIds[idx];
+
+          if (idx === current) {
+            iframe.src = makeSrc(id, true);
+          } else {
+            iframe.src = makeSrc(id, false);
+          }
+        });
+      });
+    }, { threshold: [0.75] });
+
+    sections.forEach(section => observer.observe(section));
+  </script>
+</body>
+</html>
