@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>YouTube Shorts iframe 테스트 v2</title>
+  <title>YouTube Shorts iframe 오버레이 비교 테스트 v3</title>
   <style>
     * { box-sizing: border-box; }
     html, body {
@@ -45,12 +45,7 @@
       overflow: hidden;
     }
 
-    .yt-player {
-      width: 100%;
-      height: 100%;
-      background: #000;
-    }
-
+    .yt-player,
     iframe {
       width: 100%;
       height: 100%;
@@ -63,7 +58,7 @@
       position: absolute;
       top: calc(14px + env(safe-area-inset-top));
       left: 14px;
-      z-index: 10;
+      z-index: 30;
       color: #fff;
       background: rgba(0,0,0,.45);
       padding: 6px 10px;
@@ -72,30 +67,41 @@
       pointer-events: none;
     }
 
-    .note {
+    .mode-panel {
       position: fixed;
       top: calc(10px + env(safe-area-inset-top));
       right: 10px;
-      z-index: 20;
-      color: #fff;
-      background: rgba(37, 99, 235, .9);
-      padding: 7px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      pointer-events: none;
+      z-index: 50;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: 78vw;
       transition: opacity .25s ease;
     }
 
-    .note.hide { opacity: 0; }
+    .mode-panel.dim { opacity: .22; }
 
-    .fallback {
-      position: absolute;
-      left: 14px;
-      right: 14px;
-      bottom: calc(18px + env(safe-area-inset-bottom));
-      z-index: 10;
-      color: rgba(255,255,255,.8);
-      background: rgba(0,0,0,.45);
+    .mode-btn {
+      border: 0;
+      border-radius: 999px;
+      padding: 7px 10px;
+      color: #fff;
+      background: rgba(80,80,80,.9);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .mode-btn.active { background: rgba(37, 99, 235, .96); }
+
+    .version {
+      position: fixed;
+      left: 12px;
+      bottom: calc(12px + env(safe-area-inset-bottom));
+      z-index: 50;
+      color: rgba(255,255,255,.85);
+      background: rgba(0,0,0,.55);
       padding: 8px 10px;
       border-radius: 10px;
       font-size: 12px;
@@ -104,24 +110,67 @@
       transition: opacity .25s ease;
     }
 
-    .fallback.hide { opacity: 0; }
+    .version.dim { opacity: .18; }
+
+    .test-overlay {
+      position: absolute;
+      inset: 0 0 110px 0;
+      z-index: 20;
+      background: rgba(255, 0, 0, .045);
+      touch-action: none;
+      cursor: pointer;
+    }
+
+    .test-overlay.pass {
+      pointer-events: none;
+      background: rgba(0, 120, 255, .035);
+    }
+
+    .tap-log {
+      position: fixed;
+      left: 50%;
+      top: 56px;
+      transform: translateX(-50%);
+      z-index: 70;
+      color: #fff;
+      background: rgba(0,0,0,.7);
+      border-radius: 999px;
+      padding: 7px 11px;
+      font-size: 12px;
+      opacity: 0;
+      transition: opacity .18s ease;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    .tap-log.show { opacity: 1; }
   </style>
 </head>
 <body>
-  <div class="note" id="note">controls=0 · reload 없음</div>
+  <div class="mode-panel" id="modePanel">
+    <button class="mode-btn active" data-mode="none">A 기본</button>
+    <button class="mode-btn" data-mode="block">B 오버레이 차단</button>
+    <button class="mode-btn" data-mode="pass">C 오버레이 통과</button>
+  </div>
+  <div class="tap-log" id="tapLog">overlay click</div>
+  <div class="version" id="version">
+    v3 · overlay 비교 테스트<br />
+    A: iframe만 / B: 뷰스터식 덮개 / C: pointer-events:none
+  </div>
   <main class="app" id="app"></main>
 
   <script>
     /*
-      v2 변경점
-      1. 슬라이드 이동 시 iframe src를 다시 로드하지 않습니다.
-      2. YouTube IFrame API로 현재 영상 playVideo, 이전 영상 pauseVideo만 호출합니다.
-      3. controls=0 옵션으로 하단 컨트롤/버튼 노출을 최소화합니다.
-      4. autoplay + mute 상태로 시작합니다.
+      v3 목적
+      - YouTube Shorts iframe 자체 오버레이가 빈 공간 터치 후 사라지는지 확인
+      - 뷰스터처럼 iframe 위에 absolute overlay를 올렸을 때 터치 이벤트를 가로채는지 확인
+      - B 모드: overlay가 터치를 가로챔
+      - C 모드: overlay는 있지만 pointer-events:none으로 iframe 터치 통과
 
-      주의:
-      YouTube iframe 내부의 상단 제목/Shorts 로고/일시정지 아이콘 등은
-      YouTube가 자체적으로 제어하는 UI라 완전 제거가 안 될 수 있습니다.
+      테스트 방법
+      1. A 기본: 영상 빈 공간 터치 → YouTube 버튼이 사라지는지 확인
+      2. B 오버레이 차단: 같은 동작이 막히는지 확인
+      3. C 오버레이 통과: 다시 사라지는지 확인
     */
 
     const videoIds = [
@@ -138,9 +187,13 @@
     ];
 
     const app = document.getElementById("app");
+    const modePanel = document.getElementById("modePanel");
+    const version = document.getElementById("version");
+    const tapLog = document.getElementById("tapLog");
     const players = [];
     let currentIndex = 0;
     let apiReady = false;
+    let mode = "none";
 
     videoIds.forEach((id, i) => {
       const section = document.createElement("section");
@@ -158,14 +211,8 @@
       index.className = "index";
       index.textContent = `${i + 1} / ${videoIds.length}`;
 
-      const fallback = document.createElement("div");
-      fallback.className = "fallback";
-      fallback.textContent = "슬라이드 이동 시 재로딩 없이 play/pause만 테스트";
-      setTimeout(() => fallback.classList.add("hide"), 2500);
-
       wrap.appendChild(playerDiv);
       wrap.appendChild(index);
-      wrap.appendChild(fallback);
       section.appendChild(wrap);
       app.appendChild(section);
     });
@@ -185,25 +232,20 @@
           playerVars: {
             autoplay: i === 0 ? 1 : 0,
             mute: 1,
-            controls: 0,
+            controls: 1,
             playsinline: 1,
             rel: 0,
-            fs: 0,
+            fs: 1,
             disablekb: 1,
             iv_load_policy: 3,
-            modestbranding: 1,
             enablejsapi: 1,
             origin: location.origin
           },
           events: {
             onReady: (event) => {
               event.target.mute();
-
-              if (i === 0) {
-                safePlay(event.target);
-              } else {
-                event.target.pauseVideo();
-              }
+              if (i === 0) safePlay(event.target);
+              else event.target.pauseVideo();
             },
             onStateChange: (event) => {
               if (event.data === YT.PlayerState.ENDED) {
@@ -224,35 +266,54 @@
     }
 
     function safePause(player) {
-      try {
-        player.pauseVideo();
-      } catch (e) {}
+      try { player.pauseVideo(); } catch (e) {}
     }
 
     function activate(index) {
       if (!apiReady || !players[index]) return;
-
       currentIndex = index;
-
       players.forEach((player, i) => {
         if (!player || typeof player.playVideo !== "function") return;
-        if (i === currentIndex) {
-          safePlay(player);
-        } else {
-          safePause(player);
-        }
+        if (i === currentIndex) safePlay(player);
+        else safePause(player);
       });
+    }
+
+    function setMode(nextMode) {
+      mode = nextMode;
+      document.querySelectorAll(".mode-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.mode === mode);
+      });
+      applyOverlayMode();
+      showLog(mode === "none" ? "A 기본: overlay 없음" : mode === "block" ? "B: overlay가 터치 가로챔" : "C: overlay는 있지만 터치 통과");
+    }
+
+    function applyOverlayMode() {
+      document.querySelectorAll(".test-overlay").forEach(el => el.remove());
+      if (mode === "none") return;
+
+      document.querySelectorAll(".player-wrap").forEach(wrap => {
+        const overlay = document.createElement("div");
+        overlay.className = "test-overlay" + (mode === "pass" ? " pass" : "");
+        overlay.setAttribute("aria-hidden", "true");
+        overlay.addEventListener("click", () => showLog("overlay click: iframe에 터치 전달 안 됨"));
+        wrap.appendChild(overlay);
+      });
+    }
+
+    function showLog(text) {
+      tapLog.textContent = text;
+      tapLog.classList.add("show");
+      clearTimeout(showLog.timer);
+      showLog.timer = setTimeout(() => tapLog.classList.remove("show"), 1300);
     }
 
     const sections = [...document.querySelectorAll(".short")];
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
         if (!entry.isIntersecting || entry.intersectionRatio < 0.65) return;
-
         const next = Number(entry.target.dataset.index);
-        if (next !== currentIndex) {
-          activate(next);
-        }
+        if (next !== currentIndex) activate(next);
       });
     }, { threshold: [0.65] });
 
@@ -267,7 +328,16 @@
       }, 120);
     }, { passive: true });
 
-    setTimeout(() => document.getElementById("note").classList.add("hide"), 2500);
+    modePanel.addEventListener("click", (e) => {
+      const btn = e.target.closest(".mode-btn");
+      if (!btn) return;
+      setMode(btn.dataset.mode);
+    });
+
+    setTimeout(() => {
+      modePanel.classList.add("dim");
+      version.classList.add("dim");
+    }, 3500);
   </script>
 </body>
 </html>
